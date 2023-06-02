@@ -1,0 +1,97 @@
+name: SpeechImpact CI/CD - On push to to origin/develop
+on:
+  push:
+    branches:
+      - 'main'
+
+env:
+  AWS_S3_BUCKET: 'nguyengiason'
+  AWS_ACESS_KEY_ID: ${{secrets.AWS_ACESS_KEY_ID}}
+  AWS_SECRET_ACCESS_KEY: ${{secrets.AWS_SECRET_ACCESS_KEY}}
+
+jobs:
+  ci:
+    name: Build Artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+          check-latest: true
+
+      - name: Getting yarn cache directory patch
+        id: yarn-cache-dir-path
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+
+      - uses: actions/cache@v3
+        id: yarn-cache
+        with:
+          path: ${{steps.yarn-cache-dir-path.outputs.dir}}
+          key: ${{runner.os}}-yarn-${{hashFiles('**/yarn.lock')}}
+          restore-keys: ${{runner.os}}-yarn-
+
+      - name: Install Dependencies
+        run: yarn install --prefer-offline
+
+      - name: SHAs
+        uses: nrwl/nx-set-shas@v3
+
+      - name: Lint
+        run: yarn nx affected --target=lint --parallel
+
+      - name: Tests
+        run: yarn nx affected --target=test --parallel
+
+      - name: Build
+        run: yarn nx affected --target=build
+
+      - name: Build keycloak kcapp
+        run: yarn keycloak
+
+      - name: Get affected app
+        id: get-affected-apps
+        run: |
+          echo "::set-output name=affected_apps::$(./node_modules/.bin/nx affected:apps --plain)"
+
+      - name: Saving kcapp build as artifact
+        if: ${{contains(steps.get-affected-apps.outputs.affected_apps, 'src-kcapp')}}
+        uses: actions/upload-artifact@v3
+        with:
+          name: kcapp-artifact
+          path: dist/apps/kcapp
+
+  build-kc-S3:
+    name: Deploy KCApp application
+    if: ${{ contains(needs.ci.outputs.affected_apps, 'kcapp')}}
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download KcApp artifact;
+        uses: actions/download-artifact@v3
+        with:
+          name: app
+
+      - name: Upload to S3
+        run: |
+          aws s3 sync build_keycloak/target/keycloak-keycloak-theme-0.0.0.jar s3://nguyengiason/
+
+      - name: Restart k8s
+        run: |
+          kubectl rollout restart deployment/${{secrets.K8S_DEPLOYMENT_NAME}}
+
+      - name: Deploy S3
+        uses: jakejarvis/s3-sync-action@master
+        with:
+          args: --acl public-read --follow-symlinks --delete
+        env:
+          SOURCE_DIR: 'build_keycloak/target/keycloak-keycloak-theme-0.0.0.jar'

@@ -1,0 +1,16 @@
+{
+  "name": "src-person",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "src/person/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "lint": {
+      "executor": "@nrwl/linter:eslint",
+      "outputs": ["{options.outputFile}"],
+      "options": {
+        "lintFilePatterns": ["src/person/**/*.{ts,tsx,js,jsx}"]
+      }
+    }
+  }
+}
